@@ -1,0 +1,116 @@
+Jenkins-File
+@Library('shared_library@devops') _
+pipeline{
+    agent {label 'JENKINS_SLAVE-02'}
+    environment {
+      Group = "SpringbootMicroService-Migration"
+      JOBName = "AadhaarCardFrontController-UAT-jar"
+      branchName = "uat"
+      GITLAB_TOKEN = credentials('GitUserPassword')
+      REPO_URL = 'https://git.equitasbank.com/SpringbootMicroService/ESB_Migration/AadhaarCard/AadhaarCardFrontController.git'
+		  JAVA_HOME = '/appdata/java/jdk-17.0.16'
+		  PATH = "${env.JAVA_HOME}/bin:$PATH"
+      TARGET_SERVER = credentials('142ServerIP')
+      TARGET_USER = credentials('AUsername')
+      ArtifactoryLink = envvariables.getArtifactoryLink()
+      sonarqubeurl = 'http://10.100.23.14:9000'
+      JenkinsPath = envvariables.getJenkinsPath()
+      REMOTEPATH = envvariables.getRemotePathMigration()
+	    BACKUPPATH = envvariables.getBackupPathMigration()
+      JFROG_USERNAME = credentials('jfrog_username')
+      JFROG_PASSWORD = credentials('jfrog_password')
+      projectkey = "AadharCardFrontController"
+      sonarqubeToken = "AadharCardFrontController-devops"
+      JAR_FILE = '${JenkinsPath}/${Group}/${JOBName}/target/*.jar'
+      WORKSPACE = "${JenkinsPath}/${Group}/${JOBName}/target"
+      Fortifypath = "${JenkinsPath}/${Group}/${JOBName}/"
+      FortifyappName = 'AadharFC-WSO2'
+      REMOTE_PATH = "${REMOTEPATH}/AadhaarCardFrontController/"
+      packageName = "AadhaarCardFrontController-0.0.1-SNAPSHOT"
+      SELECT_SERVICE = "aadhaar-card-front-controller"
+      BACKUP_PATH = "${BACKUPPATH}/AadhaarCardFrontController"
+      packagePath = "nagarro/AadharCardFrontController/snapshot"
+      packageBackup = "nagarro/AadharCardFrontController/backup"
+      build_ok = false
+      lastSuccessfulBuildID = 0
+    }
+    stages{
+      stage('Code Checkout') {
+        steps{
+          CodeCheckout()
+        }
+      }
+      stage('Unit Test'){
+        steps{
+          UnitTest()
+        }
+      }
+      /*stage('Codecoverage Test'){
+        steps{
+          CodeCoverage()
+        }
+      }*/
+      stage('SonarQube analysis') {
+        steps{
+          SonarqubeAnalysis()
+        }
+      }
+      stage('Validate Qualitygates'){
+        steps {
+          SonarqubeQualityGates()
+        }
+      }
+    }
+    post {
+      always {
+        cleanWs()
+      }
+    }
+  }
+
+
+
+
+UnitTest.groovy
+
+def call (){
+    sh 'mvn clean test -X' // Replace with your test command
+    junit 'target/surefire-reports/*.xml' // Replace with your JUnit report location
+    def coverage = junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true
+    def passPercentage = coverage.passCount / (coverage.passCount + coverage.failCount + coverage.skipCount)
+    env.PASS_PERCENTAGE = passPercentage
+    if (passPercentage < 1.0) {
+        error "Test pass percentage is below 100%"
+    }
+    else {
+        echo "Test pass percentage is 100%"
+    }
+}
+
+SonarqubeAnalysis.groovy
+
+def call(){
+    withSonarQubeEnv('sonarqube') {
+        sh """
+            mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.1.2184:sonar -X -Dsonar.projectKey=${projectkey} -Dsonar.host.url=${sonarqubeurl} -Dsonar.java.binaries=* -Dsonar.exclusions=**/*.xml
+        """
+    }
+}
+
+
+SonarqubeQualityGates.groovy
+
+def call(){
+    def qualityGateStatusUrl = "${sonarqubeurl}/api/qualitygates/project_status?projectKey=${projectkey}"
+    def sonarqubeQualityGateStatus = sh(script: "curl -k -u ${sonarqubeToken}: '${qualityGateStatusUrl}'", returnStdout: true).trim()
+    if (sonarqubeQualityGateStatus.contains('"status":"ERROR"'))
+    {
+        currentBuild.result = 'FAILURE'
+        error "Sonarqube quality gate failed. See Sonarqube for details."
+    }
+    else {
+        currentBuild.result = 'SUCCESS'
+        echo "Sonarqube quality gate passed. Proceeding with the build."
+    }
+}
+
