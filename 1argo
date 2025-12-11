@@ -1,0 +1,127 @@
+Nice — that screenshot shows the Argo CD CLI example for adding a custom CA certificate so Argo CD can talk to a Git server that uses a self-signed / privately-signed cert. Below I’ll walk you through a safe, practical step-by-step process (CLI first, then a short non-prod alternative and troubleshooting).
+
+⸻
+
+1) Get the Git server certificate (PEM format)
+
+You need the server CA certificate in PEM text form (—–BEGIN CERTIFICATE—– …). Two quick ways:
+
+From your workstation (recommended):
+
+# replace git.example.com:443 with your git host and port
+openssl s_client -showcerts -connect git.example.com:443 </dev/null \
+  2>/dev/null | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' > ~/git-ca.crt
+
+Or export it from the browser (View certificate → export PEM) and save as ~/git-ca.crt.
+
+Confirm file looks right:
+
+head -n 3 ~/git-ca.crt
+# should start with -----BEGIN CERTIFICATE-----
+
+
+⸻
+
+2) Install the argocd CLI (if you don’t have it)
+
+Linux / macOS example:
+
+# macOS / Linux (change URL to latest if needed)
+curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+chmod +x /usr/local/bin/argocd
+argocd version
+
+(If on Windows use the appropriate binary or choco/scoop.)
+
+⸻
+
+3) Log in to the Argo CD server with the CLI
+
+Use the Argo CD service endpoint (the server address you use for the web UI) and an account that can modify repo config (admin or equivalent):
+
+argocd login <ARGOCD_SERVER_HOST> \
+  --username admin \
+  --password '<ADMIN_PASSWORD>' \
+  # if your Argo CD server uses a self-signed cert, add --insecure
+
+If you use port 443 or custom port add --port <PORT>.
+
+⸻
+
+4) Add the certificate to Argo CD (the CLI method in your screenshot)
+
+This uploads the CA cert into Argo CD so the repo service will trust the Git host:
+
+argocd cert add-tls git.example.com --cert-path ~/git-ca.crt
+
+What this does: it tells Argo CD to trust the TLS chain for git.example.com. Replace hostname and path as needed.
+
+⸻
+
+5) Verify the cert was added and test the repo
+
+You can now add the Git repo (or re-add) normally. Example with HTTPS + personal access token:
+
+argocd repo add https://git.example.com/myorg/myrepo.git \
+  --username <your-username> \
+  --password <personal-access-token>
+
+If you already had the repo configured, try argocd repo get <repo-url-or-name> or try to create an app pointing at it — Argo CD should be able to fetch manifests without x509: certificate signed by unknown authority errors.
+
+⸻
+
+Non-production alternative (skip verification) — not recommended for prod
+
+If you just want to bypass TLS verification temporarily (NOT for production), you can use the --insecure-skip-server-verification flag when adding the repo:
+
+argocd repo add https://git.example.com/myorg/myrepo.git \
+  --username user --password token \
+  --insecure-skip-server-verification
+
+This disables server cert verification — use only in testing.
+
+⸻
+
+Troubleshooting checklist
+
+If things don’t work:
+	1.	Re-check the saved PEM: openssl x509 -in ~/git-ca.crt -noout -text — ensure it’s valid.
+	2.	Hostname matching: the certificate must be valid for the git host you used (SNI/name). If the cert is for git.example.com but you added git, it won’t match.
+	3.	Certificate chain: if the server uses an intermediate CA, you may need to include the full chain PEM (root + intermediate) in git-ca.crt.
+	4.	Check Argo CD logs:
+
+kubectl -n argocd logs deploy/argocd-repo-server
+kubectl -n argocd logs deploy/argocd-server
+
+Look for TLS / x509 errors.
+
+	5.	If you modified certs manually in the cluster, you might need to restart repo-server:
+
+kubectl -n argocd rollout restart deployment argocd-repo-server
+
+
+	6.	Confirm the repo works from inside Argo CD container (helps debug DNS/SNI issues):
+
+kubectl -n argocd exec -it deploy/argocd-repo-server -- /bin/sh
+# inside container:
+apk add --no-cache curl         # or use what the image has
+curl -vI https://git.example.com
+
+
+	7.	Permission issues: ensure the argocd CLI account you used to add cert has permissions to change repo config.
+
+⸻
+
+Summary (short)
+	1.	Export server CA to PEM (~/git-ca.crt).
+	2.	Install & login with argocd CLI.
+	3.	Run argocd cert add-tls <git-host> --cert-path ~/git-ca.crt.
+	4.	Add/retry the repo; verify.
+	5.	Use --insecure-skip-server-verification only for testing.
+
+⸻
+
+If you want, I can:
+	•	produce the exact commands tailored to your Git host (tell me the hostname and Argo CD server address), or
+	•	show how to bundle intermediate certs if your chain is split, or
+	•	help you inspect the repo-server logs (paste the error output).
