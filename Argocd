@@ -1,0 +1,168 @@
+Nice — SSH is the best way for secure, reliable ArgoCD ↔ GitLab integration. Below is a step-by-step, copy-pasteable procedure (CLI + UI options + verification + troubleshooting). I’ll assume your ArgoCD is in the argocd namespace and your GitLab host is git.chola.com.
+
+⸻
+
+1) Create an SSH keypair for ArgoCD
+
+Generate an SSH key (ed25519 recommended) on any machine you control (your laptop or jump host). Keep the private key safe.
+
+# run where you can safely store the private key temporarily
+ssh-keygen -t ed25519 -C "argocd@git.chola.com" -f ./argocd_gitlab_key -N ""
+# outputs:
+#   ./argocd_gitlab_key        -> private key (keep secret)
+#   ./argocd_gitlab_key.pub    -> public key (upload to GitLab)
+
+If you prefer RSA: replace -t ed25519 with -t rsa -b 4096.
+
+⸻
+
+2) Add the public key to GitLab
+
+Two common options:
+
+A. Project (Deploy Key) — good if ArgoCD only needs that single project:
+	•	Go to Project → Settings → Repository → Deploy Keys.
+	•	Add title, paste the contents of argocd_gitlab_key.pub.
+	•	Enable “Allow write” only if ArgoCD must push (rare). Usually leave read-only.
+
+B. Machine/User SSH key (recommended for many repos) — create a GitLab service account (user), add the public key to that user:
+	•	Log in as the service user → User Settings → SSH Keys → paste the public key.
+	•	Add that user to the projects/groups with at least Reporter (read) access.
+
+Use option B if ArgoCD will access many repos; option A is simplest for single project.
+
+⸻
+
+3) Add GitLab host key to ArgoCD (known_hosts)
+
+ArgoCD validates the GitLab host key. Produce the host key and store it in the argocd known hosts configmap.
+
+# fetch git host key (run from a safe shell)
+ssh-keyscan -H git.chola.com > git_chola_known_hosts
+
+# verify the file
+cat git_chola_known_hosts
+
+Now upload it to ArgoCD:
+
+kubectl -n argocd create configmap argocd-ssh-known-hosts-cm \
+  --from-file=ssh_known_hosts=./git_chola_known_hosts \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+After updating known hosts, restart repo-server to reload the config:
+
+kubectl -n argocd rollout restart deployment argocd-repo-server
+
+
+⸻
+
+4A) Add the SSH private key to ArgoCD (recommended: use argocd CLI)
+
+If you have the argocd CLI installed (easiest and recommended):
+
+# add an SSH repo (argocd will store the SSH key in its secret store)
+argocd login <ARGOCD_SERVER>                # if not already logged in
+argocd repo add git@git.chola.com:group/repo.git \
+  --ssh-private-key-path ./argocd_gitlab_key
+
+Replace group/repo.git with your repo path, e.g. mygroup/myapp.git.
+
+This stores credentials securely and registers the repo with ArgoCD.
+
+⸻
+
+4B) Alternate: Add repo via ArgoCD Web UI (SSH)
+
+If you prefer the UI:
+	1.	Open ArgoCD Web UI → Settings (gear) → Repositories → Connect Repo Using SSH (or “New Repository”).
+	2.	Repo URL: git@git.chola.com:group/repo.git
+	3.	Paste the private key (open ./argocd_gitlab_key and paste contents).
+	4.	Click Connect / Save.
+
+(For multiple repos, repeat or use the machine user key approach.)
+
+⸻
+
+4C) Alternate manual Kubernetes secret (advanced)
+
+If you cannot use argocd CLI or UI, you may create a secret that ArgoCD reads. Example (not required if you used argocd repo add or UI):
+
+kubectl -n argocd create secret generic ssh-repo-creds \
+  --from-file=sshPrivateKey=./argocd_gitlab_key \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+Then in ArgoCD argocd-cm you’d reference this credential — this is more advanced and error-prone; prefer CLI/UI.
+
+⸻
+
+5) Verify connectivity from ArgoCD repo server
+
+Exec into the ArgoCD repo-server pod and test a git ls-remote to confirm everything works:
+
+# find a repo-server pod
+kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-repo-server
+
+# exec into it (replace pod name)
+kubectl -n argocd exec -it <argocd-repo-server-pod> -- /bin/sh
+
+# inside pod, test SSH access
+git ls-remote git@git.chola.com:group/repo.git
+# expected: list of refs (or success)
+
+If you see Permission denied (publickey) -> key not added to GitLab or wrong private key.
+
+If you see Host key verification failed -> known_hosts not correct in ArgoCD.
+
+If you see x509 errors — that’s TLS/HTTPS; irrelevant for SSH.
+
+⸻
+
+6) Create an Application using the SSH repo
+
+When creating an ArgoCD Application (UI or YAML), use the SSH repo URL:
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'git@git.chola.com:group/repo.git'
+    targetRevision: HEAD
+    path: k8s/overlays/prod
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: myapp-namespace
+  syncPolicy:
+    automated: {}
+
+ArgoCD will use the SSH credentials stored earlier.
+
+⸻
+
+Troubleshooting checklist
+	•	Repo URL format for SSH must be git@git.chola.com:group/repo.git (note the :).
+	•	Public key must be on GitLab (project deploy key OR user SSH key/service account).
+	•	Private key used must be passphraseless or ArgoCD must be able to unlock it (passphrase not supported by default).
+	•	argocd-ssh-known-hosts-cm must contain the correct host key (use ssh-keyscan -H).
+	•	Restart argocd-repo-server after configmap/secret changes.
+	•	Check kubectl -n argocd logs deployment/argocd-repo-server for errors.
+	•	If multiple repos across groups/projects are used, consider a GitLab machine user (service account) with a single SSH key added to that user and then adding that user to projects/groups.
+
+⸻
+
+Quick summary (minimal)
+	1.	ssh-keygen -t ed25519 -f ./argocd_gitlab_key -N ""
+	2.	Add ./argocd_gitlab_key.pub to GitLab (deploy key or service-user SSH key).
+	3.	ssh-keyscan -H git.chola.com > git_chola_known_hosts
+	4.	kubectl -n argocd create configmap argocd-ssh-known-hosts-cm --from-file=ssh_known_hosts=./git_chola_known_hosts -o yaml | kubectl apply -f -
+	5.	argocd repo add git@git.chola.com:group/repo.git --ssh-private-key-path ./argocd_gitlab_key
+	6.	Restart repo-server and test git ls-remote from repo-server pod.
+
+⸻
+
+If you want, I can:
+	•	produce exact commands customized for your repo path (tell me the group/repo.git), or
+	•	show how to add the repository using only kubectl if you don’t have the argocd CLI.
