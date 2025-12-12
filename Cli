@@ -1,0 +1,74 @@
+Below is the complete ArgoCD CLI command to create an application with:
+
+✔ application name
+✔ project name
+✔ sync policy = automatic + prune + self-heal
+✔ source = repo URL, revision (branch), path
+✔ destination = cluster URL + namespace
+
+⸻
+
+✅ Full ArgoCD CLI Command
+
+argocd app create <app-name> \
+  --project <project-name> \
+  --repo https://git.equitasbank.com/<group>/<repo>.git \
+  --revision <branch-name> \
+  --path <manifest-folder> \
+  --dest-server https://kubernetes.default.svc \
+  --dest-namespace <namespace> \
+  --sync-policy automated \
+  --auto-prune \
+  --self-heal
+
+
+⸻
+
+🔍 Example (Fully Working)
+
+If your app is spring-api, project is default, repo is “deployment”, branch is at, path is “k8s”, namespace is springboot-bau:
+
+argocd app create spring-api \
+  --project default \
+  --repo https://git.equitasbank.com/springboot/services.git \
+  --revision at \
+  --path k8s \
+  --dest-server https://kubernetes.default.svc \
+  --dest-namespace springboot-bau \
+  --sync-policy automated \
+  --auto-prune \
+  --self-heal
+
+
+⸻
+
+🧾 Meaning of Flags
+
+Flag	Description
+--project	ArgoCD project (default / custom)
+--repo	Git repository URL
+--revision	Git branch (e.g., at, preprod, release)
+--path	Path where YAML/helm files exist
+--dest-server	Kubernetes API URL (use default inside cluster)
+--dest-namespace	Target namespace
+--sync-policy automated	Enables auto-sync
+--auto-prune	Deletes old resources
+--self-heal	Fixes drift automatically
+
+
+⸻
+
+⭐ If Your Repo Name Added in ArgoCD Is “deployment”
+
+Then use:
+
+--repo deployment
+
+Example:
+
+--repo deployment
+
+
+⸻
+
+If you want, tell me your repo URL, branch, namespace, and I will generate your exact ready-to-run command.
