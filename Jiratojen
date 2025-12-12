@@ -1,0 +1,98 @@
+Below is a complete Jira Summary, Detailed Description, and Worklog Comment for your use.
+This covers Jira → Jenkins integration process in on-premises, the R&D activities, and the PCR whitelisting process.
+
+You can directly paste this into your Jira ticket.
+
+⸻
+
+✅ JIRA SUMMARY
+
+Implementation of Jira-to-Jenkins Integration and Whitelisting Process in On-Premises Environment
+
+⸻
+
+✅ JIRA DETAILED DESCRIPTION
+
+1. Objective
+
+To integrate Jira with our on-premises Jenkins environment to enable automated build triggers based on Jira issue updates (e.g., transitioning to “Ready for Deployment”), and to complete the required network whitelisting through PCR.
+
+⸻
+
+2. Jira → Jenkins Integration Approach (On-Premises)
+
+A. Jenkins Configuration
+	1.	Installed the Jira Trigger Plugin in the on-prem Jenkins master.
+	2.	Configured Jira site URL, credentials, and API token within Jenkins global settings.
+	3.	Added Jira trigger configuration in required Jenkins pipeline jobs to listen for specific Jira events (example: issue status change, label update, comment text match).
+	4.	Mapped the Jira issue key to the Jenkins environment variable ($JiraIssueKey) for downstream usage in build and deployment stages.
+
+⸻
+
+B. Jira Configuration
+	1.	Validated Jira project workflow states used for deployments (AT → UAT → Preprod → Prod).
+	2.	Verified webhook triggering permissions and ensured that Jira can send event notifications to the Jenkins server.
+	3.	Confirmed required custom fields and transitions for deployment tracking.
+
+⸻
+
+C. On-Premises Network Constraints
+	•	Since both Jira and Jenkins are hosted on-premises with restricted inter-network communication, Jira webhooks were not reachable initially from Jenkins.
+	•	Required firewall-level communication enabling.
+
+⸻
+
+3. PCR Whitelisting Process
+
+To establish connectivity between Jira and Jenkins:
+	1.	Raised a PCR request to whitelist the Jenkins production slave IP and Jenkins master IP with the Jira UAT and Prod servers.
+	2.	Provided the following details in the PCR:
+	•	Source and Destination IPs
+	•	Ports required (HTTPS 443)
+	•	Purpose: Jira-to-Jenkins webhook integration
+	•	Security justification
+	3.	Awaited approval from InfoSec and Network teams.
+	4.	Post-approval, connectivity was tested using:
+	•	curl -vk https://<jenkins-master>
+	•	Testing webhook delivery from Jira to Jenkins
+
+⸻
+
+4. R&D (Research and Development Activities)
+	1.	Analysed Jira Trigger plugin behavior in mixed environments (on-prem → on-prem, on-prem → cloud).
+	2.	Tested multiple Jenkins trigger conditions:
+	•	Jira status change triggers
+	•	Comment-based triggers (e.g., “/deploy”)
+	•	Label-based triggers
+	3.	Performed certificate validation tests:
+	•	Identified Jenkins not trusting Jira SSL certificate
+	•	Exported and imported Jira’s certificate into Jenkins truststore
+	4.	Validated multiple deployment scenarios across environments (AT → Preprod → Prod) to ensure seamless behavior.
+
+⸻
+
+5. Current Status
+	•	Jira-to-Jenkins integration established successfully in AT environment.
+	•	Whitelisting PCR submitted and pending final approval.
+	•	Additional testing is underway before rolling out to Preprod and Prod environments.
+
+⸻
+
+✅ WORKLOG COMMENT (Ready to Paste)
+
+Worklog – R&D, Integration Testing & PCR Coordination
+
+Performed detailed R&D on Jira-to-Jenkins integration for on-premises setup. Installed and configured Jira Trigger Plugin in Jenkins and validated plugin compatibility. Investigated SSL certificate trust issues and exported the expired/required Jira certificate for truststore import into Jenkins.
+
+Tested webhook communication between Jira and Jenkins; identified network restrictions preventing connectivity. Raised a PCR to whitelist Jenkins and Jira servers for bidirectional communication (HTTPS port 443). Coordinated with the network team for approvals and testing.
+
+Executed multiple test cycles covering Jira status triggers, comment triggers, and deployment workflow validation. Conducted end-to-end AT build trigger testing successfully and prepared documentation for next phases (Preprod & Prod).
+
+⸻
+
+If you want, I can also prepare:
+
+✅ Deployment workflow diagram
+✅ Standard Jira deployment ticket template
+✅ End-to-end documentation (PDF / PPT)
+Just tell me!
